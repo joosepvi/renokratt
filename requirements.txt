@@ -1,0 +1,8 @@
+viktor==14.7.1
+compute-rhino3d
+rhino3dm
+pandas
+openpyxl
+numpy
+requests
+plotly
