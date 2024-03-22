@@ -5,11 +5,12 @@ import requests
 import json
 from datetime import datetime
 from pathlib import Path
+from functools import lru_cache
 
 # Current file's directory (app.py's location)
 app_dir = Path(__file__).parent
 
-tester_path = app_dir / "resto" / "muutujad.xlsx"
+muutujad_path = app_dir / "teadmusbaas" / "muutujad.xlsx"
 kb_path = app_dir / "teadmusbaas" / "teadmusbaas.xlsx"
 korterelamud_path = app_dir / "teadmusbaas" / "eesti-korterelamud.xlsx"
 typo_path = app_dir / "teadmusbaas" / "tüpoloogia.xlsx"
@@ -21,10 +22,12 @@ df_typoloogia = pd.read_excel(typo_path, sheet_name="Tüpoloogia tabel")
 
 ehr_url = "https://livekluster.ehr.ee/api/building/v2/buildingData"
 digikaksik_url = "https://livekluster.ehr.ee/api/3dtwin/v1/rest-api/particles?bbox=542914.54,6589115.305,542915.54,6589116.305"
-maaamet_url = "https://gpa.maaamet.ee/api/" #Maa-ameti Geodeesia teenused
+maaamet_url = "https://gpa.maaamet.ee/api/"  # Maa-ameti Geodeesia teenused
 
 YMBRUSE_R = 100
 
+
+@lru_cache(maxsize=128)  # Adjust maxsize according to your needs
 def get_ehr_data(ehr_kood):
     start_time = datetime.now()  # Start timing for feedback
     response = requests.get(ehr_url + '?ehr_code=' + str(ehr_kood))
@@ -32,12 +35,37 @@ def get_ehr_data(ehr_kood):
     return json.loads(response.text)
 
 
-def getvslist():
-    return df_vs['nimetus'].tolist()
+# Function to cache and read an Excel file, returning a pandas DataFrame of the entire file
+@lru_cache(maxsize=None)
+def read_excel_file_cached(file_path):
+    return pd.ExcelFile(file_path)
 
 
-def getohulekelist():
-    return df_ohuleke['nimetus'].tolist()
+# Function to read a specific sheet from the cached Excel file
+def read_excel_sheet(file_path, sheet_name):
+    excel_file = read_excel_file_cached(file_path)
+    return excel_file.parse(sheet_name)
+
+
+def get_muutujad_excel_sheet(sheet_name):
+    return read_excel_sheet(muutujad_path, sheet_name)
+
+
+def get_kb_excel_sheet(sheet_name):
+    return read_excel_sheet(kb_path, sheet_name)
+
+
+def get_korterelamud_excel_sheet(sheet_name):
+    return read_excel_sheet(korterelamud_path, sheet_name)
+
+
+def get_typo_excel_sheet(sheet_name):
+    return read_excel_sheet(typo_path, sheet_name)
+
+
+# Function to extract a column as a list from a given DataFrame
+def get_column_list_from_df(df, column_name):
+    return df[column_name].tolist()
 
 
 def get_vs_u(params, **kwargs):
@@ -123,7 +151,6 @@ def get_building_ehr_info(ehr_kood):
         elif tehn_naitaja['klNimetus'] == 'Võrgu- või mahutigaasi olemasolu':
             gaas = tehn_naitaja['nimetus']
 
-
     all_coords = geometry['coordinates'][0]
     min_x = min(coord[0] for coord in all_coords) + 1
     max_x = max(coord[0] for coord in all_coords) - 1
@@ -194,7 +221,7 @@ def get_building_ehr_info(ehr_kood):
                                 'E33': gaas,
                                 }, name='väärtus')
 
-    #print("get_building_ehr_info() runtime: ", datetime.now() - start_time)
+    # print("get_building_ehr_info() runtime: ", datetime.now() - start_time)
     # return Pandas.Series type
     return ehitise_andmed
 
@@ -228,7 +255,7 @@ def get_building_geometry_values():
         "L25": 0,
         "L26": 987.28,
         "L27": 608.4,
-        #"T8": 7.9,
+        # "T8": 7.9,
         "T11": 1862.42,
         "R312": 0.0,
         "R313": 0.0,
@@ -238,23 +265,23 @@ def get_building_geometry_values():
         "R317": 0.0,
         "R318": 0.3,
         "R319": 0.0,
-        #"T12": 0.8, Väärtused tulevad otse tüpoloogiast
-        #"T13": 0.9,
-        #"T14": 0.0,
-        #"T15": 0.15,
-        #"T16": 0.7,
-        #"T17": 2.0,
-        #"T18": 2.4,
-        #"T19": 1.17,
-        #"T20": 0.49,
-        #"T21": 0.0,
-        #"T22": 0.15,
-        #"T23": 0.5,
-        #"T24": 0.77,
-        #"T25": 1.03,
-        #"T26": 0.07,
-        #"T27": 6.0,
-        #"T41": 0.25,
+        # "T12": 0.8, Väärtused tulevad otse tüpoloogiast
+        # "T13": 0.9,
+        # "T14": 0.0,
+        # "T15": 0.15,
+        # "T16": 0.7,
+        # "T17": 2.0,
+        # "T18": 2.4,
+        # "T19": 1.17,
+        # "T20": 0.49,
+        # "T21": 0.0,
+        # "T22": 0.15,
+        # "T23": 0.5,
+        # "T24": 0.77,
+        # "T25": 1.03,
+        # "T26": 0.07,
+        # "T27": 6.0,
+        # "T41": 0.25,
     }, name='väärtus')
     return ps
 
@@ -265,7 +292,6 @@ def get_building_df(ehr_kood):
 
     ehr_andmed = get_building_ehr_info(ehr_kood)
 
-
     # Hoone tüpoloogia tunnuskood, alati str
     typo_kood = get_typo_kood(ehr_kood)
 
@@ -275,16 +301,16 @@ def get_building_df(ehr_kood):
     if typo_df is None:
         typo_andmed = None
         andmed2 = pd.Series({
-                    'T1': typo_kood,
+            'T1': typo_kood,
         }, name='väärtus')
     else:
         typo_andmed = typo_df.rename(columns={typo_kood: 'väärtus'})
 
         trepikodade_arv = resto.get_trepikodade_arv(ehr_andmed)
         andmed2 = pd.Series({
-                    'T1': typo_kood,
-                    'E8': int(trepikodade_arv),
-                    'T8': float(trepikodade_arv * typo_andmed['väärtus']['T54'] * typo_andmed['väärtus']['T55']),
+            'T1': typo_kood,
+            'E8': int(trepikodade_arv),
+            'T8': float(trepikodade_arv * typo_andmed['väärtus']['T54'] * typo_andmed['väärtus']['T55']),
         }, name='väärtus')
 
     pindalad = get_building_geometry_values()
@@ -294,7 +320,7 @@ def get_building_df(ehr_kood):
     data = pd.concat([ehr_andmed, andmed2, typo_andmed, defaults, pindalad])
 
     # Print runtime of the calculation
-    #print("get_building_df() runtime: ", datetime.now() - start_time)
+    # print("get_building_df() runtime: ", datetime.now() - start_time)
     return data
 
 
@@ -379,7 +405,7 @@ def get_katastri_koordinaadid(bbox_lest):
 
     if response.status_code == 200:
         collections = response.json()
-        #print(collections['features'][0])
+        # print(collections['features'][0])
         for feature in collections['features']:
             for polygon in feature['geometry']['coordinates']:
                 latlon = [{"x": lat, "y": lon} for lon, lat in polygon]
@@ -395,17 +421,19 @@ def get_katastri_koordinaadid(bbox_lest):
     return polygons
 
 
-def infer(ehr_kood):
+def infer_vana(ehr_kood):
     """Loome algandmetest uusi teadmisi hoone kohta."""
     start_time = datetime.now()  # Start timing for feedback
 
     data = get_building_df(ehr_kood)
+    muutujad = resto.get_muutujad()
+
     if data is None:
         return "No data!"
 
     if data['väärtus']['T1'] != 'Pole teada':
         r1tor18data = resto.calculate_R1_to_R18(data['väärtus'])
-        envelope_H = None #resto.calculate_envelope_H(data['väärtus'])
+        envelope_H = None  # resto.calculate_envelope_H(data['väärtus'])
         data = pd.concat([data, r1tor18data, envelope_H])
     else:
         print("Hoone tüübi kategooria pole teada, seega RESTO funktsioonid ei käivitu!")
@@ -414,12 +442,44 @@ def infer(ehr_kood):
     return data
 
 
-#data = infer(104018667)
-#print(get_katastri_koordinaadid(data['väärtus']['bbox_ymbrus']))
+def set_nimetus_column(data):
+    muutujad = get_muutujad_excel_sheet('Muutujate andmebaas')
+    code_to_name_map = muutujad.set_index('Uus kood')['Nimetus'].to_dict()
+
+    # Update 'Nimetus' column with mapping, default to index if no match is found
+    data['Nimetus'] = data.index.map(lambda x: code_to_name_map.get(x, x))
+    return data
+
+
+def infer(ehr_kood):
+    """Loome algandmetest uusi teadmisi hoone kohta."""
+    start_time = datetime.now()  # Start timing for feedback
+
+    data = get_building_df(ehr_kood)
+    muutujad = get_muutujad_excel_sheet('Muutujate andmebaas')
+
+    if data is None or muutujad is None:
+        return "No data!"
+
+    if data.loc['T1', 'väärtus'] != 'Pole teada':  # Adjusted for potential indexing method
+        r1tor18data = resto.calculate_R1_to_R18(data['väärtus'])
+        envelope_H = None  # resto.calculate_envelope_H(data['väärtus'])
+        data = pd.concat([data, r1tor18data, envelope_H], axis=0, sort=False)
+    else:
+        print("Hoone tüübi kategooria pole teada, seega RESTO funktsioonid ei käivitu!")
+
+    # Nimetuse col määramine 'muutujad.xlsx' faili järgi
+    data = set_nimetus_column(data)
+
+    print("infer() runtime: ", datetime.now() - start_time)  # Print runtime of the calculation
+    return data
+
+# print(get_katastri_koordinaadid(data['väärtus']['bbox_ymbrus']))
+
 
 def export_infer_json(ehr_kood):
     building_df = infer(ehr_kood)
-    #print("Duplicates in DataFrame: " + str(any(building_df.index.duplicated())))
+    # print("Duplicates in DataFrame: " + str(any(building_df.index.duplicated())))
     building_df = building_df[~building_df.index.duplicated(keep='first')]
     building_series = building_df['väärtus']
     building_series = building_series.apply(lambda x: x.item() if isinstance(x, np.generic) else x)
@@ -429,5 +489,6 @@ def export_infer_json(ehr_kood):
 
     print(f'Data exported successfully to {json_file_path}')
 
+
 #print(infer(101020350))
-#export_infer_json(101020350)
+# export_infer_json(101020350)

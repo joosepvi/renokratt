@@ -198,5 +198,3 @@ def calculate_envelope_H(ds):
     # print("calculate_envelope_H runtime: ", datetime.now() - start_time)
 
     return h_series
-
-print(get_muutujad())

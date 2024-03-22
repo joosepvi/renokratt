@@ -4,7 +4,8 @@ import plotly.graph_objects as go
 import pandas as pd
 
 from viktor import ViktorController
-from viktor.parametrization import ViktorParametrization, OutputField, NumberField, AutocompleteField, LineBreak, Text, Step, Lookup
+from viktor.parametrization import ViktorParametrization, OutputField, NumberField, OptionField, LineBreak, \
+    Text, Step, Lookup, Section, OptionField, BooleanField, TextAreaField
 from viktor.external.generic import GenericAnalysis
 from viktor.views import GeometryView, PDFView
 from viktor.views import GeometryResult
@@ -16,11 +17,10 @@ from viktor.views import PDFView, PDFResult
 
 import inferenceEngine
 
-
 DEFAULT_EHR = 101020350  # Akadeemia tee 4, 101027657 Estonia Teater
 
-vslist = inferenceEngine.getvslist()
-ohulekelist = inferenceEngine.getohulekelist()
+vslist = inferenceEngine.get_kb_excel_sheet('vs')['nimetus'].tolist()
+ohulekelist = inferenceEngine.get_kb_excel_sheet('õhuleke')['nimetus'].tolist()
 
 building_df = inferenceEngine.infer(DEFAULT_EHR)
 
@@ -55,44 +55,74 @@ class Parametrization(ViktorParametrization):
     """Teine etapp on renoveerimislahenduse konfigureerimine."""
     etapp_2 = Step('Konfigureerimine', views=['run_grasshopper', 'get_plotly_view', 'visualize_data'],
                    previous_label='Tagasi', next_label='Edasi')
-    etapp_2.intro = Text("Nüüd saad sa valida erinevate renoveerimislahenduste vahel ja erinevaid "
-                         "konfiguratsioone läbi mängida. Paremal pool ülemises ribas saad näha erinevaid "
-                         "arvutustulemusi, mis Sinu valitud konfiguratsiooni kohta käivad.")
-    etapp_2.ehr = OutputField('EHR kood:', value=Lookup('etapp_1.ehr'), flex=50)
-    etapp_2.tyyp = OutputField('Hoone tüüp:', value=Lookup('etapp_1.tyyp'), flex=50)
+    etapp_2.sec_intro = Section('Sissejuhatus')
+    etapp_2.sec_intro.intro = Text('## Konfigureerimine \n'
+                                   'Nüüd saad sa renoveerimislahenduste vahel valida ja erinevaid '
+                                   'konfiguratsioone läbi mängida! \n\n'
+                                   'Paremal pool ülemises ribas saad näha erinevaid '
+                                   'arvutustulemusi, mis Sinu valitud konfiguratsiooni kohta käivad.\n\n'
+                                   'Allpool on kategoriseeritud erinevad alajaotised '
+                                   'erinevate renoveerimislahenduste valikutega.')
+    etapp_2.sec_intro.ehr = OutputField('EHR kood:', value=Lookup('etapp_1.ehr'))
 
-    etapp_2.selgitus1 = Text("## Piirdetarindid \n"
-                             "Kõige rohkem mõjutavad hoone toimivust selle piirdetarindid. Need elemendid "
-                             "määravad hoone kuju ja välimuse ning muuseas ka hoone soojapidavuse, õhupidavuse ja "
-                             "helipidavuse. Eriti oluline on välissein just energiatõhususe seisukohast.")
-    etapp_2.vs = AutocompleteField('Vali uus välissein:', options=vslist, default=vslist[0])
-    etapp_2.vs_u = OutputField('Valitud seina soojusläbivus (W/(m²K))', value=inferenceEngine.get_vs_u)
-    etapp_2.vs_paksus = OutputField('Valitud seina paksus (mm)', value=inferenceEngine.get_vs_paksus)
-    etapp_2.kl = AutocompleteField('Vali uus katus:', options=vslist, default=vslist[0]) #TODO Kaldkatuse kontroll/valik!
-    etapp_2.so = AutocompleteField('Vali uus soklisein:', options=vslist, default=vslist[0])
+    etapp_2.sec_olol = Section('Eelnevalt teostatud tööd')
+    etapp_2.sec_olol.katkate = BooleanField('Kas katusekate on vahetatud?', flex=100)
+    etapp_2.sec_olol.katsooj = BooleanField('Kas katuslage või pööningut on täiendavalt soojustatud?', flex=100)
+    etapp_2.sec_olol.vssooj = OptionField('Kas välisseinasid on soojustatud?',
+                                          options=['Ei', 'Otsaseinad', 'Terve hoone'], flex=100)
+    etapp_2.sec_olol.soksooj = BooleanField('Kas soklit on soojustatud?', flex=100)
+    etapp_2.sec_olol.silriba = BooleanField('Kas sillutisriba on uuendatud?', flex=100)
+    etapp_2.sec_olol.sooj = NumberField('Kui suur osa akendest on vahetatud? (ligikaudne vahetuse %)', variant='slider',
+                                        min=0, max=100, flex=100)
+    etapp_2.sec_olol.kytsys = BooleanField('Kas küttesüsteem on rekonstrueeritud?', flex=100)
+    etapp_2.sec_olol.veetor = BooleanField('Kas veetorustik on vahetatud?', flex=100)
+    etapp_2.sec_olol.kantor = BooleanField('Kas kanalisatsioonitorustik on vahetatud?', flex=100)
+    etapp_2.sec_olol.elsys = BooleanField('Kas elektrisüsteem on uuendatud?', flex=100)
+    etapp_2.sec_olol.toltokestus = BooleanField('Kas on teostatud tuletõkesutstöid?', flex=100)
+    etapp_2.sec_olol.markused = TextAreaField('Lisamärkused', flex=100)
 
-    etapp_2.selgitus2 = Text("## Õhupidavus \n"
-                             "Vanemad hooned pole kuigi õhupidavad. Kõik õhk, mis hoonest välja läheb, "
-                             "viib endaga kaasa ka väärtusliku soojuse, mis planeeti kütab. "
-                             "Hoone õhupidavamaks muutmine parandab oluliselt ka selle energiatõhusust, "
-                             "mis väljendub madalamates küttekuludes.")
-    etapp_2.ohuleke = AutocompleteField('Vali õhupidavus:', options=ohulekelist, default=ohulekelist[0], flex=100)
-    etapp_2.ohuleke_vaartus = OutputField('Õhulekkearv (m³/(h·m²))', value=inferenceEngine.get_ohuleke_vaartus)
+    etapp_2.sec_pt = Section('Piirdetarindid')
+    etapp_2.sec_pt.selgitus1 = Text("## Piirdetarindid \n"
+                                    "Kõige rohkem mõjutavad hoone toimivust selle piirdetarindid. "
+                                    "Need elemendid määravad hoone kuju ja välimuse "
+                                    "ning muuseas ka hoone soojapidavuse, õhupidavuse ja helipidavuse. "
+                                    "Hoone piiretarindid on eriti olulised just energiatõhususe seisukohast.")
+    etapp_2.sec_pt.vs = OptionField('Vali uus välissein:', options=vslist, default=vslist[0], flex=100)
+    # etapp_2.sec_pt.vs_u = OutputField('Valitud seina soojusläbivus (W/(m²K))', value=inferenceEngine.get_vs_u)
+    # etapp_2.sec_pt.vs_paksus = OutputField('Valitud seina paksus (mm)', value=inferenceEngine.get_vs_paksus)
+    etapp_2.sec_pt.kl = OptionField('Vali uus katus:', options=vslist,
+                                    default=vslist[0], flex=100)  # TODO Kaldkatuse kontroll/valik!
+    etapp_2.sec_pt.so = OptionField('Vali uus soklisein:', options=vslist, default=vslist[0], flex=100)
 
-    etapp_2.selgitus3 = Text("## Aknad ja uksed")
-    etapp_2.aken = AutocompleteField('Vali akende tüüp:', options=vslist, default=vslist[0])
+    etapp_2.sec_pt.selgitus2 = Text("## Õhupidavus \n"
+                                    "Vanemad hooned pole kuigi õhupidavad. Kõik õhk, mis hoonest välja läheb, "
+                                    "viib endaga kaasa ka väärtusliku soojuse, mis planeeti kütab. "
+                                    "Hoone õhupidavamaks muutmine parandab oluliselt ka selle energiatõhusust, "
+                                    "mis väljendub madalamates küttekuludes.")
+    etapp_2.sec_pt.ohuleke = OptionField('Vali õhupidavus:', options=ohulekelist, default=ohulekelist[0],
+                                         flex=100)
+    # etapp_2.sec_pt.ohuleke_vaartus = OutputField('Õhulekkearv (m³/(h·m²))', value=inferenceEngine.get_ohuleke_vaartus)
 
-    etapp_2.selgitus4 = Text("## Küttesüsteem")
-    etapp_2.kyte = AutocompleteField('Vali küttesüsteemi tüüp:', options=vslist, default=vslist[0])
+    etapp_2.sec_pt.selgitus3 = Text("## Aknad ja uksed")
+    etapp_2.sec_pt.aken = OptionField('Vali akende tüüp:', options=vslist, default=vslist[0], flex=100)
 
-    etapp_2.selgitus5 = Text("## Ventilatsioon \n"
-                             "Kas ventilatsioonisüsteem on tsentraalne/trepikojapõhine/korteripõhine, "
-                             "sissepuhe ja/või väljatõmme")
-    etapp_2.vent = AutocompleteField('Vali ventilatsiooni tüüp:', options=vslist, default=vslist[0])
+    etapp_2.sec_ts = Section('Tehnosüsteemid')
+    etapp_2.sec_ts.selgitus4 = Text("## Küttesüsteem")
+    etapp_2.sec_ts.kyte = OptionField('Vali küttesüsteemi tüüp:', options=vslist, default=vslist[0], flex=100)
 
-    etapp_2.selgitus6 = Text("## Tugev- ja nõrkvool \n"
-                             "Pistikute hulk, kilpide asukohad, vask/valgus, kvaliteedi tase, ATS, fonolukk jms")
-    etapp_2.elekter = AutocompleteField('Vali midagi:', options=vslist, default=vslist[0])
+    etapp_2.sec_ts.selgitus5 = Text("## Ventilatsioon \n"
+                                    "Kas ventilatsioonisüsteem on tsentraalne/trepikojapõhine/korteripõhine, "
+                                    "sissepuhe ja/või väljatõmme")
+    etapp_2.sec_ts.vent = OptionField('Vali ventilatsiooni tüüp:', options=vslist, default=vslist[0], flex=100)
+
+    etapp_2.sec_ts.selgitus6 = Text("## Tugev- ja nõrkvool \n"
+                                    "Pistikute hulk, kilpide asukohad, vask/valgus, kvaliteedi tase, ATS, fonolukk jms")
+    etapp_2.sec_ts.elekter = OptionField('Vali midagi:', options=vslist, default=vslist[0], flex=100)
+
+    etapp_2.sec_muu = Section('Muu')
+    etapp_2.sec_muu.selgitus4 = Text("## Rõdud ja lodžad")
+
+    etapp_2.sec_muu.selgitus5 = Text("## Hoonevälised tööd")
 
     """Kolmas etapp on konfiguratsioonist lähteülesande dokumendi vormistamine."""
     etapp_3 = Step('Lähteülesanne', views=['get_pdf_view'], previous_label='Tagasi', next_label='...')
@@ -106,7 +136,6 @@ class Controller(ViktorController):
 
     @MapView('Kaart', duration_guess=1)
     def get_map_view(self, params, **kwargs):
-
         # Make sure we have the latest data with the correct EHR code
         building_df = inferenceEngine.infer(params.etapp_1.ehr)
 
@@ -140,19 +169,17 @@ class Controller(ViktorController):
 
         return GeometryResult(geometry=threedm_file, geometry_type="3dm")
 
-    @DataView("OUT[:100]", duration_guess=1)
+    @DataView("Hoone andmed", duration_guess=1)
     def visualize_data(self, params, **kwargs):
-
         # Make sure we have the latest data with the correct EHR code
         building_df = inferenceEngine.infer(params.etapp_1.ehr)
 
-        data = DataGroup(*[DataItem(index, str(row['väärtus'])) for index, row in building_df.iterrows()][:100])
+        data = DataGroup(*[DataItem(str(row['Nimetus']), str(row['väärtus'])) for index, row in building_df.iterrows()][:100])
 
         return DataResult(data)
 
     @PlotlyView("Energiatõhusus", duration_guess=1)
     def get_plotly_view(self, params, **kwargs):
-
         # Make sure we have the latest data with the correct EHR code
         building_df = inferenceEngine.infer(params.etapp_1.ehr)
         en_margis = building_df['väärtus']['energiamargis']
@@ -162,13 +189,13 @@ class Controller(ViktorController):
 
         fig = go.Figure(
             data=[go.Bar(x=['TODO! Arvutuslik ETA esialgne, \n(RESTO + tüpoloogia andmed)',
-                            'Energiamärgis '+en_margis['tyyp'],
+                            'Energiamärgis ' + en_margis['tyyp'],
                             'TODO! Arvutuslik ETA täna, \n(RESTO + tänase olukorra konfiguratsiooni andmed)',
                             'TODO! Arvutuslik ETA pärast renoveerimist, \n(RESTO + perspektiivse konfiguratsiooni andmed)'],
-                         y=[400,  #TODO Arvutada RESTOga kasutades tüpoloogia andmeid
+                         y=[400,  # TODO Arvutada RESTOga kasutades tüpoloogia andmeid
                             en_margis['arv'],
-                            400,  #TODO Arvutada RESTOga kasutades konfiguratsiooni andmeid
-                            400])],  #TODO Arvutada RESTOga kasutates konfiguratsiooni andmeid
+                            400,  # TODO Arvutada RESTOga kasutades konfiguratsiooni andmeid
+                            400])],  # TODO Arvutada RESTOga kasutates konfiguratsiooni andmeid
             layout=go.Layout(title=go.layout.Title(text="Energiatõhusus"))
         )
         return PlotlyResult(fig.to_json())
@@ -177,6 +204,5 @@ class Controller(ViktorController):
     def get_pdf_view(self, params, **kwargs):
         file = File.from_url(url="https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf")
         return PDFResult(file=file)
-
 
 # viktor-cli publish --registered-name reno-konfiguraator --tag v0.0.0
