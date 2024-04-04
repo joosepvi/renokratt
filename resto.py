@@ -44,70 +44,17 @@ def get_defaults():
     return defaults_df
 
 
-def vana_calculate_R1_to_R18(data):
-    """Otse RESTOst, aint et sisendiks on Series, mitte Dataframe (st üks andmerida)
-    Siit tulevad arvutuspindalad ja mõned muud olulisemad arvutusparameetrid"""
-
-    # Check if R312 exists, indicating use of specific data for window areas
-    if "R312" in data:
-        for r, l, ratio in zip(["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"],
-                               ["L11", "L12", "L13", "L14", "L15", "L16", "L17", "L18"],
-                               ["R312", "R313", "R314", "R315", "R316", "R317", "R318", "R319"]):
-            data[r] = data[l] * data[ratio]
-    else:
-        # Default calculation using T41 for window areas
-        for r, l in zip(["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"],
-                        ["L11", "L12", "L13", "L14", "L15", "L16", "L17", "L18"]):
-            data[r] = data[l] * data['T41']
-
-    # Calculate external wall area excluding windows and doors (R9)
-    data['R9'] = sum([data.get(key, 0) for key in ["L11", "L12", "L13", "L14", "L15", "L16", "L17", "L18"]]) - \
-                 sum([data.get(key, 0) for key in ["T8", "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"]])
-
-    # Other areas calculations
-    data['R10'] = data['L6']  # Ceiling
-    data['R12'] = data['L9']  # Floor on ground
-    # Total enclosure area (R15)
-    data['R15'] = sum(
-        data.get(key, 0) for key in ["L11", "L12", "L13", "L14", "L15", "L16", "L17", "L18", "R10", "R12"])
-
-    # Number of floors (R16)
-    data['R16'] = data['E10'] + data['E11']
-
-    # Air leakage rate (R17) calculation based on the number of floors
-    conditions = [
-        data['R16'] < 2,
-        data['R16'] < 3,
-        data['R16'] < 5
-    ]
-    choices = [
-        data['T27'] * data['R15'] / (3600 * 35),
-        data['T27'] * data['R15'] / (3600 * 24),
-        data['T27'] * data['R15'] / (3600 * 20)
-    ]
-    default = data['T27'] * data['R15'] / (3600 * 15)
-    data['R17'] = np.select(conditions, choices, default=default)
-
-    # Usage category according to regulations (R18)
-    conditions = [
-        (data['E6'] < 11200) & (data['E21'] <= 120),
-        (data['E6'] < 11200) & (data['E21'] <= 220),
-        (data['E6'] < 11200),
-        (data['E6'] < 11300)
-    ]
-    choices = [1, 2, 3, 4]
-    data['R18'] = np.select(conditions, choices, default=6)
-
-    return data
-
-
 def calculate_R1_to_R18(data):
     """Otse RESTOst, aint et sisendiks on Series, mitte Dataframe (st üks andmerida)
     Siit tulevad arvutuspindalad ja mõned muud olulisemad arvutusparameetrid"""
     new_values = {}
 
-    # Check if R312 exists, indicating use of specific data for window areas
-    if "R312" in data:
+    # Juhul kui avade arvutuspindalad on teada
+    if all(r in data for r in ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"]):
+        # If R1 to R8 already exist, no further action is needed
+        pass
+    # Juhul kui on ainult tüpoloogiajärgsed avade osakaalud
+    elif "R312" in data:
         for r, l, ratio in zip(["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"],
                                ["L11", "L12", "L13", "L14", "L15", "L16", "L17", "L18"],
                                ["R312", "R313", "R314", "R315", "R316", "R317", "R318", "R319"]):
@@ -119,8 +66,11 @@ def calculate_R1_to_R18(data):
             new_values[r] = data.get(l, 0) * data.get('T41', 0)
 
     # Calculate external wall area excluding windows and doors (R9)
-    new_values['R9'] = sum([data.get(key, 0) for key in ["L11", "L12", "L13", "L14", "L15", "L16", "L17", "L18"]]) - \
-                       sum([data.get(key, 0) for key in ["T8", "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"]])
+    if 'R9' not in new_values:
+        new_values['R9'] = sum([data.get(key, 0) for key in ["L11", "L12", "L13", "L14", "L15", "L16", "L17", "L18"]]) - \
+                           sum([data.get(key, 0) for key in ["T8", "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"]])
+    else:
+        pass
 
     # Other areas calculations
     new_values['R10'] = data.get('L6', 0)  # Ceiling
