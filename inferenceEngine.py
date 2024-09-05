@@ -1,3 +1,5 @@
+import urllib
+
 import pandas as pd
 import numpy as np
 import resto as resto
@@ -29,6 +31,22 @@ YMBRUSE_R = 100
 
 
 @lru_cache(maxsize=128)  # Adjust maxsize according to your needs
+def get_address_info(address):
+    encoded_address = urllib.parse.quote(address)  # URL-encode the address
+    json_url = f"https://inaadress.maaamet.ee/inaadress/gazetteer?address={encoded_address}"
+    #print(json_url)
+    response = requests.get(json_url)
+    first_address = response.json()["addresses"][0]
+    return first_address
+
+
+def get_ehr_kood(address):
+    address_info = get_address_info(address)
+    ehr_kood = int(address_info.get("tunnus"))
+    return ehr_kood
+
+
+@lru_cache(maxsize=128)  # Adjust maxsize according to your needs
 def get_ehr_response(ehr_kood):
     start_time = datetime.now()  # Start timing for feedback
     response = requests.get(ehr_url + '?ehr_code=' + str(ehr_kood))
@@ -44,6 +62,7 @@ def get_resto_respone(json_data):
     response = requests.get(resto_request_url)
     response_json = json.loads(response.text)
 
+    print(json_data)
     #print("get_resto runtime: ", datetime.now() - start_time)
     return response_json
 
@@ -90,7 +109,8 @@ def get_typo_kood(ehr_kood):
 
 
 def app_get_typo_kood(params, **kwargs):
-    return get_typo_kood(params.et_intr.ehr)
+    #return get_typo_kood(params.et_intr.ehr)
+    return get_typo_kood(get_ehr_kood(params.et_intr.aad))
 
 
 def get_typo_df(typo_kood):
@@ -183,6 +203,8 @@ def get_building_ehr_info(ehr_kood):
             koetav_pind = None
         if koetav_pind is None:
             koetav_pind = netopind
+        elif koetav_pind == 0:
+            koetav_pind = netopind
     else:
         etakek_tyyp = None
         etakek_value = None
@@ -274,38 +296,38 @@ def get_building_geometry_values():
     # Placeholder väärtused võetud Elisa Iliste tehnilise passi scriptist, hoone 101020350
     ps = pd.Series({
         "L5": 2641.387088,
-        "L6": 890.154987,
         "L7": 0,
-        "L8": 0,
-        "L9": 890.149708,
-        "L10": 0,
-        "L11": 0,
-        "L12": 1129.946334,
-        "L13": 0,
-        "L14": 192.371898,
-        "L15": 0,
-        "L16": 1129.762098,
-        "L17": 0,
-        "L18": 189.306758,
         "L19": 10,
         "L20": 5,
-        "L21": 62.259995,
-        "L22": 339.4255,
-        "L23": 0,
-        "L24": 0,
-        "L25": 0,
-        "L26": 1357.702,
-        "L27": 0,
-        "R1": 0,
-        "R2": 293.786047,
-        "R3": 0,
-        "R4": 50.016693,
-        "R5": 0,
-        "R6": 293.738146,
-        "R7": 0,
-        "R8": 49.219757,
-        "R9": 1954.626445,
-        "T11": 0  # TODO
+        "L6": 539.6,
+        "L8": 0.0,
+        "L9": 539.64,
+        "L10": 0.0,
+        "L11": 233.6,
+        "L12": 0.0,
+        "L13": 1299.1,
+        "L14": 0.0,
+        "L15": 233.6,
+        "L16": 0.0,
+        "L17": 1269.1,
+        "L18": 0.0,
+        "L21": 392.32,
+        "L22": 184.22,
+        "L23": 0.0,
+        "L24": 141.04,
+        "L25": 0.0,
+        "L26": 987.28,
+        "L27": 608.4,
+        "R1": 62.623933008,
+        "R2": 0.0,
+        "R3": 348.2652027856,
+        "R4": 0.0,
+        "R5": 62.623933008,
+        "R6": 0.0,
+        "R7": 340.2227456356,
+        "R8": 0.0,
+        "R9": 3011.64,
+        "T11": 1862.42  # TODO
     }, name='väärtus')
 
     return ps
@@ -496,7 +518,7 @@ def infer(params, **kwargs):
     """Põhifunktsioon, mis loob algteadmistest uusi teadmisi hoone kohta."""
     start_time = datetime.now()  # Niisama funktsiooni ajakulu mõõtmiseks
 
-    building_df_synd = get_building_df(params.et_intr.ehr)  # Avaandmed ja tüpoloogia teadmised
+    building_df_synd = get_building_df(get_ehr_kood(params.et_intr.aad))  # Avaandmed ja tüpoloogia teadmised
     building_df_tana = building_df_synd.copy()
     building_df_konf = building_df_synd.copy()
 
@@ -544,7 +566,9 @@ def infer(params, **kwargs):
         building_df_konf = get_resto_knowledge(building_df_konf)
         building_df_konf = set_nimetus_column(building_df_konf)  # Nimetuse col määramine 'muutujad.xlsx' faili järgi
     else:
-        print("Hoone tüübi kategooria pole teada, seega RESTO funktsioonid ei käivitu!")
+        print("Hoone tüübi kategooria pole teada, seega RESTO funktsioonid ei käivitu.")
+
+    print("Köetav pindala: " + str(building_df_synd['väärtus']['E21']))
 
     print("infer() runtime: ", datetime.now() - start_time)  # Print runtime of the calculation
     return [building_df_synd, building_df_tana, building_df_konf]
@@ -563,6 +587,37 @@ def export_infer_json(ehr_kood):
 
     print(f'Data exported successfully to {json_file_path}')
 
+def get_color_scale():
+    return {
+        "A": "green",
+        "B": "#32CD32",  # LimeGreen
+        "C": "#7FFF00",  # Chartreuse
+        "D": "orange",
+        "E": "#FF4500",  # OrangeRed
+        "F": "red",
+        "G": "#8B0000",  # DarkRed
+        "H": "brown"
+    }
+
+def get_eta_varv(eta):
+    # Arvud on vastavalt rekonstrueeritavate korterelamute määrusejärgsetele väärtustele
+    color_scale = get_color_scale()
+    if eta <= 105:
+        return color_scale["A"]
+    elif eta <= 125:
+        return color_scale["B"]
+    elif eta <= 150:
+        return color_scale["C"]
+    elif eta <= 180:
+        return color_scale["D"]
+    elif eta <= 220:
+        return color_scale["E"]
+    elif eta <= 280:
+        return color_scale["F"]
+    elif eta <= 340:
+        return color_scale["G"]
+    else:
+        return color_scale["H"]
 
 #print(infer(101011007))
 # export_infer_json(101020350)

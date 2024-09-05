@@ -1,11 +1,15 @@
+import urllib
 from io import BytesIO
 import json
+from pathlib import Path
+
 import plotly.graph_objects as go
 import pandas as pd
+import requests
 
 from viktor import ViktorController
 from viktor.parametrization import ViktorParametrization, OutputField, NumberField, OptionField, LineBreak, \
-    Text, Step, Lookup, Section, OptionField, BooleanField, TextAreaField
+    Text, Step, Lookup, Section, OptionField, BooleanField, TextField, TextAreaField
 from viktor.external.generic import GenericAnalysis
 from viktor.views import GeometryView, PDFView
 from viktor.views import GeometryResult
@@ -14,6 +18,10 @@ from viktor.views import PlotlyView, PlotlyResult
 from viktor.views import DataGroup, DataItem, DataResult, DataView
 from viktor import File
 from viktor.views import PDFView, PDFResult
+
+from viktor import ViktorController
+from viktor.views import WebResult
+from viktor.views import WebView
 
 import inferenceEngine
 
@@ -33,17 +41,18 @@ class Parametrization(ViktorParametrization):
     """Kõik sisendväärtused, etapilisus ja väljundaknad tulevad selle klassi parameetritest."""
 
     """Esimene etapp on konkreetse renoveeritava hoone määramine."""
-    et_intr = Step('Vali hoone', views=['get_map_view'], previous_label='...', next_label='Edasi')
+    et_intr = Step('Sissejuhatus', views=['get_kaart_view'], previous_label='...', next_label='Edasi')
     et_intr.intro = Text(
         '# Renokratt \n '
-        'Renokratt on tark abiline korterelamute renoveerimise lähteülesande loomiseks. \n\n'
+        'Renokratt on tark abiline korterelamute renoveerimise võimaluste läbimängimiseks. \n\n'
         'Renokrati eesmärk on vähendada renoveerimisprotsessi tegelikku '
         'ja tunnetatud keerukust ning leevendada renoveerimisega seotud väärarusaami. '
-        'Renokratt võimaldab Sul leida just Sinu hoonele kõige sobivama renoveerimislahenduse '
-        'ning aitab Sul luua võimalikult konkreetse ja kvaliteetse lähteülesande projekteerijale ja ehitajale. \n\n'
-        'Alustamiseks sisesta vaid oma hoone Ehitusregistri kood (selle leiad aadressilt ehr.ee) '
+        'Renokratt võimaldab leida Sinu kodule kõige sobivama, kvaliteetsema ja odavama renoveerimislahenduse, '
+        'mille põhjal luua konkreetne ja kvaliteetne lähteülesanne projekteerijale ja ehitajale. \n\n'
+        'Alustamiseks sisesta vaid oma hoone aadress '
         'ja seejärel vajuta alumises paremas nurgas "Edasi" nupule.')
-    et_intr.ehr = NumberField('EHR kood', default=DEFAULT_EHR, flex=100)
+    et_intr.aad = TextField('Aadress', default='Akadeemia tee 4, Tallinn, Harju maakond', flex=100)
+    # et_intr.ehr = NumberField('EHR kood', default=DEFAULT_EHR, flex=100)
     et_intr.lb1 = LineBreak()
     et_intr.tyyp = OutputField('Hoone tüüp:', value=inferenceEngine.app_get_typo_kood, flex=100)
     et_intr.selgitus = Text("Käesolev abiline on välja töötatud enne 2000ndat aastat ehitatud telliskivist, "
@@ -54,14 +63,14 @@ class Parametrization(ViktorParametrization):
                            "Autor: Joosep Viik\n\n"
                            "Tallinna Tehnikaülikool\n\n"
                            "2024")
-    et_intr.laiskadele = Text("1-464 paneelmaja: 101020350 \n\n"
+    """et_intr.laiskadele = Text("1-464 paneelmaja: 101020350 \n\n"
                               "Tartu paneelmaja: 104018667 \n\n "
                               "Tallinna paneelmaja: 101010705 \n\n "
                               "Põlva kivimaja: 110009871 \n\n"
-                              "Teadmata tüübiga hoone: 101027657")
+                              "Teadmata tüübiga hoone: 101027657")"""
 
     """Teine etapp on tänase olukorra täpsustamine ja EhR andmete parandamine."""
-    et_par = Step('Kontrolli', views=['run_grasshopper', 'visualize_data'],
+    et_par = Step('Kontroll', views=['get_aerofotod_view', 'run_grasshopper', 'visualize_data'],
                   previous_label='Tagasi', next_label='Edasi')
     et_par.sec_intro = Section('Sissejuhatus')
     et_par.sec_intro.intro = Text('## Lähteandmete täpsustamine \n'
@@ -90,7 +99,7 @@ class Parametrization(ViktorParametrization):
     et_par.sec_ehr.koepin = OutputField('Köetav pindala:', value="", flex=100)
 
     """Kolmas etapp on renoveerimislahenduse konfigureerimine."""
-    et_konf = Step('Konfigureeri', views=['run_grasshopper', 'get_plotly_view', 'visualize_data'],
+    et_konf = Step('Konfigureerimine', views=['run_grasshopper', 'get_plotly_view', 'visualize_data'],
                    previous_label='Tagasi', next_label='Edasi')
     et_konf.sec_intro = Section('Sissejuhatus')
     et_konf.sec_intro.intro = Text('## Konfigureerimine \n'
@@ -99,7 +108,7 @@ class Parametrization(ViktorParametrization):
                                    'Paremal pool ülemises ribas saad näha erinevaid '
                                    'arvutustulemusi, mis Sinu valitud konfiguratsiooni kohta käivad.\n\n'
                                    'Allpool on alajaotised erinevate renoveerimislahenduste valikutega.')
-    et_konf.sec_intro.ehr = OutputField('EHR kood:', value=Lookup('et_intr.ehr'), flex=50)
+    # et_konf.sec_intro.ehr = OutputField('EHR kood:', value=Lookup('et_intr.ehr'), flex=50)
     et_konf.sec_intro.typokood = OutputField('Hoone tüüp:', value=inferenceEngine.app_get_typo_kood, flex=50)
 
     et_konf.sec_pt = Section('Piirdetarindid')
@@ -110,7 +119,7 @@ class Parametrization(ViktorParametrization):
                                     "Hoone piiretarindid on eriti olulised just energiatõhususe seisukohast.")
     et_konf.sec_pt.vs = OptionField('Vali uus välissein:', options=vslist, default=vslist[0], flex=100)
     et_konf.sec_pt.vs_kirj = OutputField('Lühikirjeldus', value=inferenceEngine.get_vs_kirjeldus, flex=100)
-    #et_konf.sec_pt.vs_kirj2 = Text(value=Lookup('et_konf.sec_pt.vs_kirj'))
+    # et_konf.sec_pt.vs_kirj2 = Text(value=Lookup('et_konf.sec_pt.vs_kirj'))
     et_konf.sec_pt.kl = OptionField('Vali uus katus:', options=kllist,
                                     default=kllist[0], flex=100)  # TODO Kaldkatuse kontroll/valik!
     et_konf.sec_pt.so = OptionField('Vali uus soklisein:', options=slist, default=slist[0], flex=100)
@@ -130,7 +139,8 @@ class Parametrization(ViktorParametrization):
     et_konf.sec_ts = Section('Tehnosüsteemid')
     et_konf.sec_ts.selgitus4 = Text("## Küttesüsteem")
     et_konf.sec_ts.kyte = OutputField('Vali küttesüsteemi tüüp:', value=ksyslist[0], flex=100)
-    et_konf.sec_ts.kyte2 = OptionField('Vali soojusjaotuse tüüp:', options=kjaotuslist, default=kjaotuslist[0], flex=100)
+    et_konf.sec_ts.kyte2 = OptionField('Vali soojusjaotuse tüüp:', options=kjaotuslist, default=kjaotuslist[0],
+                                       flex=100)
 
     et_konf.sec_ts.selgitus5 = Text("## Ventilatsioon \n"
                                     "Kas ventilatsioonisüsteem on tsentraalne/trepikojapõhine/korteripõhine, "
@@ -147,7 +157,7 @@ class Parametrization(ViktorParametrization):
     et_konf.sec_paike = Section('Taastuvenergia')
     et_konf.sec_paike.selgitus = Text("Lisa ehitisele päiksepaneelid või kollektorid")
     et_konf.sec_paike.voim = NumberField('Vali paneelide efektiivne tootmisvõimsus (kW):', variant='slider',
-                                       min=0, max=50, flex=100)
+                                         min=0, max=50, flex=100)
     et_konf.sec_paike.markus = TextAreaField('Lisamärkused', flex=100)
 
     et_konf.sec_muu = Section('Muu')
@@ -158,7 +168,7 @@ class Parametrization(ViktorParametrization):
     et_konf.sec_muu.markushooneval = TextAreaField('Lisamärkused', flex=100)
 
     """Viimane etapp on konfiguratsioonist lähteülesande dokumendi vormistamine."""
-    et_tul = Step('Jaga', views=['get_pdf_view'], previous_label='Tagasi', next_label='...')
+    et_tul = Step('Jagamine', views=['get_pdf_view'], previous_label='Tagasi', next_label='...')
 
 
 class Controller(ViktorController):
@@ -185,6 +195,66 @@ class Controller(ViktorController):
         # Visualize map
         features = markers
         return MapResult(features)
+
+    @WebView('Maa-ameti kaart', duration_guess=1)
+    def get_kaart_view(self, params, **kwargs):
+        address = params.et_intr.aad
+        address_info = inferenceEngine.get_address_info(address)
+        viitepunkt_x = float(address_info.get("viitepunkt_x"))
+        viitepunkt_y = float(address_info.get("viitepunkt_y"))
+
+        html_content = f"""
+        <!DOCTYPE HTML>
+        <html>
+        <head>
+            <title>In-ADS komponent</title>
+            <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+            <script type="text/javascript" src="https://inaadress.maaamet.ee/inaadress/js/inaadress.min.js?d=20220510"></script>
+        </head>
+        <body>
+            <div id="InAadressDiv" style="width: 100%; height: 100vh"></div>
+            <script>
+                var inAadress = new InAadress({{
+                    "container": "InAadressDiv",
+                    "mode": 4,
+                    "ihist": "1993",
+                    "defaultBaseLayer": "ALUSKAART",
+                    "baseLayers": ["ALUSKAART"],
+                    "WMS": [],
+                    "markers": {{
+                        "bbox": [{viitepunkt_x - 200}, {viitepunkt_y - 200}, {viitepunkt_x + 200}, {viitepunkt_y + 200}],
+                        "addresses": [{{
+                            "ident": 0,
+                            "x": "{viitepunkt_y}",
+                            "y": "{viitepunkt_x}",
+                            "title": "{address}"
+                        }}]
+                    }},
+                    "labelMode": "label",
+                    "appartment": 0,
+                    "lang": "et"
+                }});
+            </script>
+        </body>
+        </html>
+        """
+        return WebResult(html=html_content)
+
+    @WebView('Kitsendused', duration_guess=1)
+    def get_kitsendused_view(self, params, **kwargs):
+        url = f"https://kitsendused.maaamet.ee/#/avalik;ky=78405:501:2700"
+        return WebResult(url=url)
+
+    @WebView('Aerofotod', duration_guess=1)
+    def get_aerofotod_view(self, params, **kwargs):
+        address = params.et_intr.aad
+        address_info = inferenceEngine.get_address_info(address)
+        viitepunkt_x = float(address_info.get("viitepunkt_x"))
+        viitepunkt_y = float(address_info.get("viitepunkt_y"))
+        url = f"https://fotoladu.maaamet.ee/etak.php?x={viitepunkt_y}&y={viitepunkt_x}&view4"
+        #print(url)
+        return WebResult(url=url)
 
     @GeometryView('Digikaksik', duration_guess=10, update_label='Genereeri digikaksik', default_shadow=True)
     def run_grasshopper(self, params, **kwargs):
@@ -215,67 +285,110 @@ class Controller(ViktorController):
         if en_margis['tyyp'] is None:
             en_margis = {'tyyp': 'Puudub', 'arv': 0}
 
-        '''
-        # Assuming 'building_df' is defined and contains 'väärtus' column with needed components
-        ruumide_kyte = building_df['väärtus']['ruumide_kyte']
-        tarbevee_soojendamine = building_df['väärtus']['tarbevee_soojendamine']
-        valgustid_seadmed_abielekter = building_df['väärtus']['valgustid_seadmed_abielekter']
+        eta_margis = en_margis['arv']
+        eta_tana = building_df_tana['väärtus']['ETA']
+        eta_konf = building_df_konf['väärtus']['ETA']
 
-        # Create a Figure
-        fig = go.Figure()
+        en_margis_klass = en_margis['klass']
+        eta_tana_klass = building_df_tana['väärtus']['R147']
+        eta_konf_klass = building_df_konf['väärtus']['R147']
 
-        # Add the first three bars directly
-        fig.add_trace(go.Bar(
-            x=['TODO! Arvutuslik ETA esialgne, \n(RESTO + tüpoloogia andmed)',
-               'Energiamärgis ' + en_margis['tyyp'],
-               'TODO! Arvutuslik ETA täna, \n(RESTO + tänase olukorra konfiguratsiooni andmed)'],
-            y=[10,  # Placeholder value
-               en_margis['arv'],
-               10],  # Placeholder value
-            marker_color=['blue', 'red', 'blue']
-        ))
+        colors = [inferenceEngine.get_eta_varv(eta_margis),
+                  inferenceEngine.get_eta_varv(eta_tana),
+                  inferenceEngine.get_eta_varv(eta_konf)]
 
-        # Add the components of the fourth bar as separate traces for a stacked appearance
-        fig.add_trace(go.Bar(
-            x=['Arvutuslik ETA pärast renoveerimist'],
-            y=[ruumide_kyte],
-            name='Ruumide küte',
-            marker_color='lightblue'
-        ))
+        hover_texts = [
+            f"Energiamärgis: {en_margis['tyyp']}<br>Väärtus: {eta_margis} kWh/m2/a<br>Klass: {en_margis_klass}"
+            f"<br><br>KEK ehk kaalutud energiakasutus on ametlik <br>ja tegeliku energiatarbimise pealt arvutatud "
+            f"<br>energiatõhususe näitaja. <br>See väärtus on võetud EhR-st.",
+            f"Arvutuslik ETA täna<br>Väärtus: {eta_tana} kWh/m2/a<br>Klass: {eta_tana_klass}"
+            f"<br><br>ETA väärtus on teoreetiline ehitusfüüsikalistele <br>printsiipidele toetuv energiatõhususe "
+            f"näitaja. <br>See väärtus on arvutatud tüpoloogiliste <br>teadmiste ja sinu kontrollitud hoone "
+            f"<br>andmete põhjal kasutades RESTO tööriista.",
+            f"Arvutuslik ETA pärast renoveerimist<br>Väärtus: {eta_konf} kWh/m2/a<br>Klass: {eta_konf_klass}"
+            f"<br><br>ETA väärtus on teoreetiline ehitusfüüsikalistele <br>printsiipidele toetuv energiatõhususe "
+            f"näitaja. <br>See väärtus on arvutatud sinu valitud <br>renoveerimislahenduste põhjal kasutades "
+            f"<br>RESTO tööriista.",
+        ]
 
-        fig.add_trace(go.Bar(
-            x=['Arvutuslik ETA pärast renoveerimist'],
-            y=[tarbevee_soojendamine],
-            name='Tarbevee soojendamine',
-            marker_color='lightgreen'
-        ))
-
-        fig.add_trace(go.Bar(
-            x=['Arvutuslik ETA pärast renoveerimist'],
-            y=[valgustid_seadmed_abielekter],
-            name='Valgustid, seadmed, abielekter',
-            marker_color='orange'
-        ))
-
-        # Adjust the layout to stack the bars representing components of the fourth value
-        fig.update_layout(
-            barmode='stack',
-            title=go.layout.Title(text="Energiatõhusus")
-        )
-
-        '''
         fig = go.Figure(
-            data=[go.Bar(x=['Arvutuslik ETA hoone ehitamisel',
-                            'Arvutuslik ETA täna',
-                            'Energiamärgis ' + en_margis['tyyp'],
-                            'Arvutuslik ETA pärast renoveerimist'],
-                         y=[building_df_synd['väärtus']['ETA'],
-                            building_df_tana['väärtus']['ETA'],
-                            en_margis['arv'],
-                            building_df_konf['väärtus']['ETA']],
-                         marker_color=['blue', 'blue', 'red', 'blue'])],
-            layout=go.Layout(title=go.layout.Title(text="Energiatõhusus"))
+            data=[go.Bar(
+                x=['Energiamärgis ' + en_margis['tyyp'],
+                   'Arvutuslik ETA täna',
+                   'Arvutuslik ETA pärast renoveerimist'],
+                y=[eta_margis, eta_tana, eta_konf],
+                marker=dict(color=colors),
+                text=[f"{eta_margis} ({en_margis_klass})",
+                      f"{eta_tana} ({eta_tana_klass})",
+                      f"{eta_konf} ({eta_konf_klass})"],
+                hovertext=hover_texts,
+                hoverinfo="text",
+                textposition='auto',
+                showlegend=False
+            )],
+            layout=go.Layout(
+                title=go.layout.Title(text="Korterelamute energiatõhusus enne ja pärast renoveerimist"),
+                xaxis=dict(title="Etapp"),
+                yaxis=dict(title="Energiatõhususarv (kWh/m2/a)"),
+                template='plotly_white',
+                showlegend=True
+            )
         )
+
+        # Add horizontal lines for the threshold values
+        threshold_values = [105, 125, 150]
+        klassid = ["A", "B", "C"]
+        annotations = ["A", "B", "C"]
+
+        for i, value in enumerate(threshold_values):
+            line_width = 4 if value == 150 else 2
+            line_dash = "solid"  # Make all lines solid
+
+            fig.add_shape(
+                type="line",
+                x0=-0.5,
+                y0=value,
+                x1=2.5,
+                y1=value,
+                line=dict(
+                    color="LightSeaGreen",
+                    width=line_width,
+                    dash=line_dash,
+                ),
+            )
+            fig.add_annotation(
+                x=2.5,
+                y=value,
+                xref="x",
+                yref="y",
+                text=annotations[i],
+                showarrow=False,
+                font=dict(size=12, color="black"),
+                align="left",
+                xanchor="left",
+                yanchor="top",
+            )
+
+        # Add legend manually for the colors
+        fig.update_layout(
+            legend=dict(
+                title="Energiatõhususe klassid",
+                itemsizing="constant"
+            )
+        )
+
+        # Adding custom legend items
+        color_scale = inferenceEngine.get_color_scale()
+        for klass, color in color_scale.items():
+            fig.add_trace(go.Scatter(
+                x=[None], y=[None],
+                mode='markers',
+                marker=dict(size=10, color=color),
+                legendgroup=klass,
+                showlegend=True,
+                name=klass
+            ))
+
         return PlotlyResult(fig.to_json())
 
     @DataView("Hoone andmed", duration_guess=1)
@@ -290,8 +403,7 @@ class Controller(ViktorController):
 
     @PDFView("Lähteülesande PDF", duration_guess=1)
     def get_pdf_view(self, params, **kwargs):
-        file = File.from_url(url="https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf")
-        return PDFResult(file=file)
-
+        file_path = Path(__file__).parent / 'teadmusbaas' / 'MKM_m3_lisa2.pdf'
+        return PDFResult.from_path(file_path)
 
 # viktor-cli publish --registered-name reno-konfiguraator --tag v0.0.0
