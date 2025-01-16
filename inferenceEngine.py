@@ -1,10 +1,12 @@
 import urllib
+from tokenize import String
 
 import pandas as pd
 import numpy as np
 import resto as resto
 import requests
 import json
+import math
 from datetime import datetime
 from pathlib import Path
 from functools import lru_cache
@@ -62,7 +64,7 @@ def get_resto_respone(json_data):
     response = requests.get(resto_request_url)
     response_json = json.loads(response.text)
 
-    print(json_data)
+    #print(json_data)
     #print("get_resto runtime: ", datetime.now() - start_time)
     return response_json
 
@@ -252,6 +254,161 @@ def get_building_ehr_info(ehr_kood):
     return ehitise_andmed
 
 
+def get_building_geometry_values_test(bbox):
+    """
+    Funktsioon, mis arvutab hoone geomeetria väärtused, kasutades bounding box'i (bbox).
+    Rhino geomeetriast sõltuvust pole - töötleme Maa-ameti API andmeid otseselt.
+    """
+
+    # --- Samm 1: Fetch geomeetria Maa-ameti API-st ---
+    def fetch_building_geometry(bbox):
+        """Fetches building geometry from the 3D Twin API."""
+        url = f"https://livekluster.ehr.ee/api/3dtwin/v1/rest-api/particles?bbox={bbox}"
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req) as response:
+                response_data = response.read().decode('utf-8')
+                json_data = json.loads(response_data)
+            return json_data  # Tagastame JSON-andmed otse
+        except urllib.error.HTTPError as e:
+            raise RuntimeError(f"HTTP Error: {e.code}")
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"URL Error: {e.reason}")
+        except Exception as e:
+            raise RuntimeError(str(e))
+
+    # --- Samm 2: Sorteerime geomeetria osadeks ---
+    def sort_geometry(buildings):
+        """
+        Sorteerib geomeetria osadeks (seinad, maapind, tasased katused, kaldkatused).
+        Kasutatakse normaalvektoreid ja pindade kõrgusi (Z-koordinaate).
+        """
+        walls = []
+        ground = []
+        flat_roofs = []
+        sloped_roofs = []
+        sloped = False
+
+        # Parameetrid
+        vertical_tolerance = 0.1  # Seinad (peaaegu vertikaalne)
+        ground_tolerance = 1.0    # Maapinna määramine (kõrgus erinevus)
+        roof_angle_threshold = 15  # Katuse kaldkraadid
+
+        # Aitab arvutada normaalvektori ja Z-telje vahelise nurga kraadides
+        def angle_with_z_axis(nx, ny, nz):
+            # Normaliseerime normaalvektori
+            magnitude = math.sqrt(nx**2 + ny**2 + nz**2)
+            nx, ny, nz = nx / magnitude, ny / magnitude, nz / magnitude
+            # Leiame nurga kraadides Z-teljega
+            dot_product = abs(nz)  # Z-komponent määrab kaldenurga
+            angle_rad = math.acos(dot_product)
+            return math.degrees(angle_rad)
+
+        # Läbime kõik hooneosad ja klassifitseerime need
+        for building in buildings:
+            particles = building.get('particles', [])
+            for particle in particles:
+                # Võtame kolm punkti (x0, y0, z0), (x1, y1, z1), (x2, y2, z2)
+                x0, y0, z0 = particle.get('x0'), particle.get('y0'), particle.get('z0')
+                x1, y1, z1 = particle.get('x1'), particle.get('y1'), particle.get('z1')
+                x2, y2, z2 = particle.get('x2'), particle.get('y2'), particle.get('z2')
+
+                # Arvutame pindala normaali (ristvektor kahe külje vahel)
+                ux, uy, uz = x1 - x0, y1 - y0, z1 - z0
+                vx, vy, vz = x2 - x0, y2 - y0, z2 - z0
+                nx, ny, nz = (uy * vz - uz * vy), (uz * vx - ux * vz), (ux * vy - uy * vx)
+
+                # Nurk Z-teljega
+                angle = angle_with_z_axis(nx, ny, nz)
+
+                # Arvutame pinna keskmise Z-koordinaadi
+                avg_z = (z0 + z1 + z2) / 3.0
+
+                # Klassifitseerime pindala
+                if angle < vertical_tolerance:  # Peaaegu vertikaalne (seinad)
+                    walls.append((nx, ny, nz, avg_z))
+                elif angle < roof_angle_threshold:  # Tasane katus
+                    flat_roofs.append((nx, ny, nz, avg_z))
+                else:  # Kaldu (maapind või kaldkatus)
+                    if avg_z < ground_tolerance:  # Lähedal maapinnale
+                        ground.append((nx, ny, nz, avg_z))
+                    else:
+                        sloped_roofs.append((nx, ny, nz, avg_z))
+
+        if sloped_roofs:
+            sloped = True  # Hoone sisaldab kaldkatuseid
+
+        return walls, ground, flat_roofs, sloped_roofs, sloped
+
+    # --- Samm 3: Arvutame pindalad ja suunad ---
+    def calculate_parameters(walls, ground, flat_roofs, sloped_roofs, sloped):
+        """
+        Arvutab pindalade ja suundade põhjal vajalikud parameetrid.
+        """
+        def calculate_total_area(elements):
+            """Summeerib pindalade kogupindala."""
+            total_area = 0.0
+            for element in elements:
+                nx, ny, nz, avg_z = element  # Normaali vektor ja pindala kõrgus
+                area = math.sqrt(nx**2 + ny**2 + nz**2)  # Pindala on normaali suurus
+                total_area += area
+            return total_area
+
+        def classify_wall_directions(walls):
+            """Klassifitseerib seinad vastavalt ilmakaartele."""
+            directions = {f"L{i}": 0.0 for i in range(11, 19)}  # L11-L18
+            for wall in walls:
+                nx, ny, nz, avg_z = wall  # Normaali vektor ja pindala kõrgus
+                angle = math.degrees(math.atan2(ny, nx))  # Suund ilmakaarte järgi
+                if angle < 0:
+                    angle += 360
+                if 337.5 <= angle or angle < 22.5:
+                    directions["L11"] += 1
+                elif 22.5 <= angle < 67.5:
+                    directions["L12"] += 1
+                elif 67.5 <= angle < 112.5:
+                    directions["L13"] += 1
+                elif 112.5 <= angle < 157.5:
+                    directions["L14"] += 1
+                elif 157.5 <= angle < 202.5:
+                    directions["L15"] += 1
+                elif 202.5 <= angle < 247.5:
+                    directions["L16"] += 1
+                elif 247.5 <= angle < 292.5:
+                    directions["L17"] += 1
+                elif 292.5 <= angle < 337.5:
+                    directions["L18"] += 1
+            return directions
+
+        # Arvutame pindalad
+        total_wall_area = calculate_total_area(walls)
+        total_roof_area = calculate_total_area(flat_roofs) + calculate_total_area(sloped_roofs)
+        total_ground_area = calculate_total_area(ground)
+
+        # Klassifitseerime seinad suundade järgi
+        wall_directions = classify_wall_directions(walls)
+
+        return {
+            "L5": total_wall_area,  # Seinad
+            "L6": total_roof_area,  # Katused
+            "L9": total_ground_area,  # Maapind
+            **wall_directions  # Seinte suunad
+        }
+
+    # --- Samm 4: Integreeri kõik ---
+    buildings = fetch_building_geometry(bbox)
+    walls, ground, flat_roofs, sloped_roofs, sloped = sort_geometry(buildings)
+    calculated_parameters = calculate_parameters(walls, ground, flat_roofs, sloped_roofs, sloped)
+
+    # --- Tagasta tulemused Pandas Series kujul ---
+    ps = pd.Series(calculated_parameters, name='väärtus')
+    print("SIIIIIN")
+    print(ps)
+    return ps
+
+
+
+
 def get_building_geometry_values():
     # TODO: Arvuta erinevatesse ilmakaartesse vaatavad seinad.
     """''L6', 'L9', 'L11', 'L12', 'L13', 'L14', 'L15', 'L16', 'L17', 'L18', <- pindalad leiame hiljem
@@ -260,74 +417,41 @@ def get_building_geometry_values():
     'T12', 'T13', 'T15', 'T17', 'T18', 'T19', 'T20', 'T22', 'T24', 'T25', 'T26', 'T27', <- soojusläbivused
     'T41', 'R312', 'R313', 'R314', 'R315', 'R316', 'R317', 'R318', 'R319', <- akende ja fas pindalade suhe"""
 
-    # Placeholder väärtused võetud RESTO Tartu tester Excelist, hoone 104018667
-    '''ps = pd.Series({
-        "L11": 233.6,
-        "L12": 0,
-        "L13": 1299.1,
-        "L14": 0,
-        "L15": 233.6,
-        "L16": 0,
-        "L17": 1269.1,
-        "L18": 0,
-        "L6": 539.6,
-        "L8": 0,
-        "L9": 539.64,
-        "L10": 0,
-        "L21": 392.32,
-        "L22": 184.22,
-        "L23": 0,
-        "L24": 141.04,
-        "L25": 0,
-        "L26": 987.28,
-        "L27": 608.4,
-        # "T8": 7.9,
-        "T11": 1862.42,
-        "R312": 0.0,
-        "R313": 0.0,
-        "R314": 0.2,
-        "R315": 0.0,
-        "R316": 0.0,
-        "R317": 0.0,
-        "R318": 0.3,
-        "R319": 0.0
-    }, name='väärtus')'''
-
     # Placeholder väärtused võetud Elisa Iliste tehnilise passi scriptist, hoone 101020350
     ps = pd.Series({
-        "L5": 2641.387088,
-        "L7": 0,
-        "L19": 10,
-        "L20": 5,
-        "L6": 539.6,
-        "L8": 0.0,
-        "L9": 539.64,
-        "L10": 0.0,
-        "L11": 233.6,
-        "L12": 0.0,
-        "L13": 1299.1,
-        "L14": 0.0,
-        "L15": 233.6,
-        "L16": 0.0,
-        "L17": 1269.1,
-        "L18": 0.0,
-        "L21": 392.32,
-        "L22": 184.22,
-        "L23": 0.0,
-        "L24": 141.04,
-        "L25": 0.0,
-        "L26": 987.28,
-        "L27": 608.4,
-        "R1": 62.623933008,
-        "R2": 0.0,
-        "R3": 348.2652027856,
-        "R4": 0.0,
-        "R5": 62.623933008,
-        "R6": 0.0,
-        "R7": 340.2227456356,
-        "R8": 0.0,
-        "R9": 3011.64,
-        "T11": 1862.42  # TODO
+        "L5": 2641.387088,  # Fassaadi pindala
+        "L6": 539.6,  # Katuslae pindala kokku, m2
+        "L7": 0,  # Katuslae pindala
+        "L8": 0.0,  # Pööningu vahelae pindala kokku, m2
+        "L9": 539.64,  # Pinnasel põranda pindala kokku, m2
+        "L10": 0.0,  # Kütmata keldri lae pindala kokku, m2
+        "L11": 233.6,  # N fassaadi pindala kokku, m2
+        "L12": 0.0,  # NE fassaadi pindala kokku, m2
+        "L13": 1299.1,  # E fassaadi pindala kokku, m2
+        "L14": 0.0,  # SE fassaadi pindala kokku, m2
+        "L15": 233.6,  # S fassaadi pindala kokku, m2
+        "L16": 0.0,  # SW fassaadi pindala kokku, m2
+        "L17": 1269.1,  # W fassaadi pindala kokku, m2
+        "L18": 0.0,  # NW fassaadi pindala kokku, m2
+        "L19": 10,  # Ehitusaluse pinna välisnurkade arv
+        "L20": 5,  # Ehitusaluse pinna sisenurkade arv
+        "L21": 392.32,  # VS-VS liitekoha pikkus kokku, m
+        "L22": 184.22,  # VS-KL liitekoha pikkus kokku, m
+        "L23": 0.0,  # VS-PööninguVL liitekoha pikkus kokku, m
+        "L24": 141.04,  # VS-PP liitekoha pikkus kokku, m
+        "L25": 0.0,  # VS-KeldriVL liitekoha pikkus kokku, m
+        "L26": 987.28,  # VS-VL liitekoha pikkus kokku, m
+        "L27": 608.4,  # VS-SS liitekoha pikkus kokku, m
+        "R1": 62.623933008,  # N akende arvutuspindala, m2
+        "R2": 0.0,  # NE akende arvutuspindala, m2
+        "R3": 348.2652027856,  # E akende arvutuspindala, m2
+        "R4": 0.0,  # SE akende arvutuspindala, m2
+        "R5": 62.623933008,  # S akende arvutuspindala, m2
+        "R6": 0.0,  # SW akende arvutuspindala, m2
+        "R7": 340.2227456356,  # W akende arvutuspindala, m2
+        "R8": 0.0,  # NW akende arvutuspindala, m2
+        "R9": 3011.64,  # Välisseina arvutuspindala ilma akende ja usteta, m2
+        "T11": 1862.42  # Hoone akna- ja ukse seinakinnituse pikkus kokku, m
     }, name='väärtus')
 
     return ps
@@ -619,5 +743,5 @@ def get_eta_varv(eta):
     else:
         return color_scale["H"]
 
-#print(infer(101011007))
+# print(infer(101011007))
 # export_infer_json(101020350)

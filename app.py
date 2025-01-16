@@ -43,7 +43,7 @@ class Parametrization(ViktorParametrization):
     """Esimene etapp on konkreetse renoveeritava hoone määramine."""
     et_intr = Step('Sissejuhatus', views=['get_kaart_view'], previous_label='...', next_label='Edasi')
     et_intr.intro = Text(
-        '# Renokratt \n '
+        '# Renokratt (prototüüp)\n '
         'Renokratt on tark abiline korterelamute renoveerimise võimaluste läbimängimiseks. \n\n'
         'Renokrati eesmärk on vähendada renoveerimisprotsessi tegelikku '
         'ja tunnetatud keerukust ning leevendada renoveerimisega seotud väärarusaami. '
@@ -55,14 +55,15 @@ class Parametrization(ViktorParametrization):
     # et_intr.ehr = NumberField('EHR kood', default=DEFAULT_EHR, flex=100)
     et_intr.lb1 = LineBreak()
     et_intr.tyyp = OutputField('Hoone tüüp:', value=inferenceEngine.app_get_typo_kood, flex=100)
-    et_intr.selgitus = Text("Käesolev abiline on välja töötatud enne 2000ndat aastat ehitatud telliskivist, "
-                            "plokkidest ja raudbetoonpaneelidest korterelamutele. \n"
-                            "Juhul kui valitud hoone tüüp ei ole teada, siis võib programmis esineda vigu.")
+    et_intr.selgitus = Text("Märkused:\n"
+                            "- Käesolev tööriist on vaid prototüüp, mille eesmärk on Renokrati kontseptsiooni näitlikustamine.\n"
+                            "- Tööriista näidatavad andmed ei ole kontrollitud ja neisse tuleb suhtuda kriitiliselt!\n"
+                            "- Kontseptsioon on välja töötatud enne 2000ndat aastat ehitatud telliskivist, plokkidest ja raudbetoonpaneelidest korterelamutele.")
     et_intr.lb2 = LineBreak()
-    et_intr.credits = Text("Prototüüp on välja töötatud magistritöö raames.\n\n"
+    et_intr.credits = Text("Prototüüp on välja töötatud magistritöö raames, millega saab lähemalt tutvuda "
+                           "[siin](https://digikogu.taltech.ee/et/Item/e153f0a1-1de1-4897-893d-dc1f0a2dc95b)\n\n"
                            "Autor: Joosep Viik\n\n"
-                           "Tallinna Tehnikaülikool\n\n"
-                           "2024")
+                           "Tallinna Tehnikaülikool 2024")
     """et_intr.laiskadele = Text("1-464 paneelmaja: 101020350 \n\n"
                               "Tartu paneelmaja: 104018667 \n\n "
                               "Tallinna paneelmaja: 101010705 \n\n "
